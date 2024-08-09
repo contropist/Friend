@@ -29,7 +29,7 @@ def set_plugin_review(plugin_id: str, uid: str, score: float, review: str = ''):
         reviews = {}
     else:
         reviews = eval(reviews)
-    reviews[uid] = {'score': score, 'review': review, 'rated_at': datetime.now().isoformat(), 'uid': uid}
+    reviews[uid] = {'score': score, 'review': review, 'rated_at': datetime.utcnow().isoformat(), 'uid': uid}
     r.set(f'plugins:{plugin_id}:reviews', str(reviews))
 
 
@@ -67,10 +67,3 @@ def get_plugin_reviews(plugin_id: str) -> dict:
         return {}
     return eval(reviews)
 
-
-def user_has_speech_profile(uid: str) -> bool:
-    return r.exists(f'speech_profiles:{uid}') != 0
-
-
-def set_user_has_speech_profile(uid: str):
-    r.set(f'speech_profiles:{uid}', 1)

@@ -1,6 +1,10 @@
+import uuid
+from typing import List
+
 from google.cloud import firestore
 from google.cloud.firestore_v1 import FieldFilter
 
+from models.memory import MemoryPhoto
 from ._client import db
 
 
@@ -61,3 +65,40 @@ def add_memory_to_batch(batch, uid, memory_data):
     user_ref = db.collection('users').document(uid)
     memory_ref = user_ref.collection('memories').document(memory_data['id'])
     batch.set(memory_ref, memory_data)
+
+
+def get_memories_by_id(uid, memory_ids):
+    user_ref = db.collection('users').document(uid)
+    memories_ref = user_ref.collection('memories')
+
+    doc_refs = [memories_ref.document(str(memory_id)) for memory_id in memory_ids]
+    docs = db.get_all(doc_refs)
+
+    memories = []
+    for doc in docs:
+        if doc.exists:
+            memories.append(doc.to_dict())
+    return memories
+
+
+# Open Glass
+
+def store_memory_photos(uid: str, memory_id: str, photos: List[MemoryPhoto]):
+    user_ref = db.collection('users').document(uid)
+    memory_ref = user_ref.collection('memories').document(memory_id)
+    photos_ref = memory_ref.collection('photos')
+    batch = db.batch()
+    for photo in photos:
+        photo_id = str(uuid.uuid4())
+        photo_ref = photos_ref.document(str(uuid.uuid4()))
+        data = photo.dict()
+        data['id'] = photo_id
+        batch.set(photo_ref, data)
+    batch.commit()
+
+
+def get_memory_photos(uid: str, memory_id: str):
+    user_ref = db.collection('users').document(uid)
+    memory_ref = user_ref.collection('memories').document(memory_id)
+    photos_ref = memory_ref.collection('photos')
+    return [doc.to_dict() for doc in photos_ref.stream()]

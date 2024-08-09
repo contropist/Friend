@@ -1,6 +1,7 @@
 import asyncio
 import os
 import time
+from typing import Tuple, Optional
 
 import requests
 from deepgram import DeepgramClient, DeepgramClientOptions, LiveTranscriptionEvents
@@ -9,7 +10,6 @@ from pydub import AudioSegment
 from starlette.websockets import WebSocket
 
 from utils.storage import retrieve_all_samples
-from utils.stt.soniox_util import get_single_file
 from utils.stt.vad import vad_is_empty
 
 headers = {
@@ -78,27 +78,59 @@ async def send_initial_file(file_path, transcript_socket):
     # os.remove(file_path)
 
 
-def remove_downloaded_samples(uid):
-    path = f'_samples/{uid}/'
-    for file in os.listdir(path):
-        # remove except joined_output.wav
-        if file != 'joined_output.wav':
-            os.remove(f"{path}/{file}")
+# def remove_downloaded_samples(uid):
+#     path = f'_samples/{uid}/'
+#     for file in os.listdir(path):
+#         # remove except joined_output.wav
+#         if file != 'joined_output.wav':
+#             os.remove(f"{path}/{file}")
+
+
+def get_single_file(dir_path: str, target_sample_rate: int = 8000):
+    output_path = f'{dir_path}joined_output.wav'
+
+    files_to_join = []
+    for sample in os.listdir(dir_path):
+        if '.wav' not in sample:
+            continue
+        if 'joined_output.wav' in sample:
+            continue
+        path = f'{dir_path}{sample}'
+        aseg = AudioSegment.from_file(path)
+        print(path, aseg.frame_rate)
+        if aseg.frame_rate == target_sample_rate:
+            files_to_join.append(aseg)
+
+    if not files_to_join:
+        return None
+    output = files_to_join[0]
+    for audio in files_to_join[1:]:
+        output += audio
+
+    if os.path.exists(output_path):
+        os.remove(output_path)
+    output.export(output_path, format='wav')
+    return output_path
 
 
 # Add this new function to handle initial file sending
-def get_speaker_audio_file(uid):
+def get_speaker_audio_file(uid: str, target_sample_rate: int = 8000) -> Tuple[Optional[str], int]:
     path = retrieve_all_samples(uid)
-    if len(os.listdir(path)) < 5:  # means user did less than 5 samples unfortunately, so not completed
-        return None, None
-
+    files_at_path = len(os.listdir(path))
+    print('get_speaker_audio_file', uid, path, 'Files:', files_at_path)
+    if files_at_path < 5:  # means user did less than 5 samples unfortunately, so not completed
+        return None, 0
     single_file_path = f'{path}joined_output.wav'
     if os.path.exists(single_file_path):
-        duration = AudioSegment.from_wav(single_file_path).duration_seconds
-        print('get_speaker_audio_file Cached Duration:', duration)
-        return single_file_path, duration
+        aseg = AudioSegment.from_wav(single_file_path)
+        if aseg.frame_rate == target_sample_rate:  # sample sample rate
+            print('get_speaker_audio_file Cached Duration:', aseg.duration_seconds)
+            return single_file_path, aseg.duration_seconds
 
-    single_file_path = get_single_file(path)
+    single_file_path = get_single_file(path, target_sample_rate)
+    if not single_file_path:
+        return None, 0  # no files for this codec
+
     aseg = AudioSegment.from_wav(single_file_path)
     print('get_speaker_audio_file Initial Duration:', aseg.duration_seconds, 'Sample rate:', aseg.frame_rate / 1000)
     output = AudioSegment.empty()
@@ -108,30 +140,30 @@ def get_speaker_audio_file(uid):
         end = segment['end'] * 1000
         output += aseg[start:end]
 
-    if output.duration_seconds < 20:
+    seconds = 30
+    if output.duration_seconds < seconds:
         print('get_speaker_audio_file Output Duration:', output.duration_seconds)
-        return single_file_path, output.duration_seconds
+        return single_file_path, output.duration_seconds  # < 30
 
-    seconds = 20
-    output = output[:20 * 1000]
+    output = output[:seconds * 1000]
     output.export(single_file_path, format="wav")
-    return single_file_path, seconds
+    return single_file_path, output.duration_seconds  # 30
 
 
 deepgram = DeepgramClient(os.getenv('DEEPGRAM_API_KEY'), DeepgramClientOptions(options={"keepalive": "true"}))
 
 
 async def process_audio_dg(
-        fast_socket: WebSocket, language: str, sample_rate: int, codec: str, channels: int,
-        preseconds: int = 0,
+        fast_socket: WebSocket, language: str, sample_rate: int, codec: str, channels: int, preseconds: int = 0,
 ):
     loop = asyncio.get_event_loop()
 
     def on_message(self, result, **kwargs):
-        # print("Received message from Deepgram")  # Log when message is received
+        print(f"Received message from Deepgram")  # Log when message is received
         sentence = result.channel.alternatives[0].transcript
         if len(sentence) == 0:
             return
+        # print(sentence)
         segments = []
         for word in result.channel.alternatives[0].words:
             is_user = True if word.speaker == 0 and preseconds > 0 else False
@@ -161,6 +193,8 @@ async def process_audio_dg(
                     })
         # print(json.dumps(segments, indent=2))
         # Use asyncio.run_coroutine_threadsafe to call async function from sync context
+        # TODO: a new thread should be started, so that it calls utils.plugins.trigger_realtime_integrations
+        # + the app receives the notification message + get's added to the app.
         asyncio.run_coroutine_threadsafe(fast_socket.send_json(segments), loop)
 
     def on_error(self, error, **kwargs):
@@ -182,8 +216,9 @@ def connect_to_deepgram(on_message, on_error, language: str, sample_rate: int, c
             endpointing=100,
             language=language,
             interim_results=False,
-            sample_rate=None if sample_rate == 48000 else sample_rate,
+            sample_rate=sample_rate,
             smart_format=True,
+            profanity_filter=False,
             diarize=True,
             filler_words=False,
             channels=channels,

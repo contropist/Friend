@@ -1,5 +1,6 @@
 *.env
-__pycache__/
+*__pycache__/
+*venv/
 libraries/
 myenv/
 venv/
@@ -126,11 +127,16 @@ docs/_site/
 plugins/example/tmp/
 
 backend/pretrained_models/
-/backend/scripts/
+/backend/scripts/data/
 /backend/pretrained_models/
 
-google-credentials.json
+backend/google-credentials.json
+backend/google-credentials-dev.json
 
 startup-script.sh
 /app/lib/firebase_options_dev.dart
 /app/lib/firebase_options_prod.dart
+app/lib/env/dev_env.g.dart
+app/lib/env/prod_env.g.dart
+/app/lib/libobjectbox.dylib
+/app/lib/objectbox-model.json

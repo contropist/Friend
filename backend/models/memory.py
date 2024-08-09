@@ -1,10 +1,11 @@
 from datetime import datetime
 from enum import Enum
-from typing import List, Optional, Dict
+from typing import List, Optional
 
 from fastapi import FastAPI
 from pydantic import BaseModel, Field
 
+from models.chat import Message
 from models.transcript_segment import TranscriptSegment
 
 app = FastAPI()
@@ -28,6 +29,7 @@ class CategoryEnum(str, Enum):
     business = 'business'
     social = 'social'
     work = 'work'
+    sports = 'sports'
     other = 'other'
 
 
@@ -79,39 +81,48 @@ class Structured(BaseModel):
             result += "Action Items:\n"
             for item in self.action_items:
                 result += f"- {item.description}\n"
+        if self.events:
+            result += "Events:\n"
+            for event in self.events:
+                result += f"- {event.title} ({event.start} - {event.duration} minutes)\n"
         return result.strip()
 
 
 class Geolocation(BaseModel):
-    google_place_id: str
+    google_place_id: Optional[str] = None
     latitude: float
     longitude: float
-    altitude: Optional[float] = None
-    accuracy: Optional[float] = None
-    address: str
-    location_type: str
+    address: Optional[str] = None
+    location_type: Optional[str] = None
+
+
+class MemorySource(str, Enum):
+    friend = 'friend'
+    openglass = 'openglass'
+    screenpipe = 'screenpipe'
 
 
 class Memory(BaseModel):
     id: str
     created_at: datetime
-    transcript: str
-    structured: Structured
-
     started_at: Optional[datetime]
     finished_at: Optional[datetime]
 
-    transcript_segments: List[TranscriptSegment] = []
-    plugins_results: List[PluginResult] = []
-    geolocation: Optional[Geolocation] = None
+    source: Optional[MemorySource] = MemorySource.friend  # TODO: once released migrate db to include this field
+    language: Optional[str] = None  # applies only to Friend # TODO: once released migrate db to default 'en'
 
+    structured: Structured
+    transcript_segments: List[TranscriptSegment] = []
+    geolocation: Optional[Geolocation] = None
     photos: List[MemoryPhoto] = []
+
+    plugins_results: List[PluginResult] = []
 
     discarded: bool = False
     deleted: bool = False
 
     @staticmethod
-    def memories_to_string(memories: List['Memory'], include_transcript: bool = False) -> str:
+    def memories_to_string(memories: List['Memory']) -> str:
         result = []
         for memory in memories:
             memory_str = f"{memory.created_at.isoformat().split('.')[0]}\nTitle: {memory.structured.title}\nSummary: {memory.structured.overview}\n"
@@ -120,8 +131,6 @@ class Memory(BaseModel):
                 for item in memory.structured.action_items:
                     memory_str += f"  - {item.description}\n"
             memory_str += f"Category: {memory.structured.category}\n"
-            if include_transcript:
-                memory_str += f"Transcript:\n{memory.transcript}\n"
             result.append(memory_str.strip())
         return "\n\n".join(result)
 
@@ -133,6 +142,12 @@ class CreateMemory(BaseModel):
     started_at: datetime
     finished_at: datetime
     transcript_segments: List[TranscriptSegment]
+    geolocation: Optional[Geolocation] = None
+
+    photos: List[MemoryPhoto] = []
+
+    source: MemorySource = MemorySource.friend
+    language: Optional[str] = None
 
     def get_transcript(self) -> str:
         return TranscriptSegment.segments_as_string(self.transcript_segments, include_timestamps=True)
@@ -140,4 +155,4 @@ class CreateMemory(BaseModel):
 
 class CreateMemoryResponse(BaseModel):
     memory: Memory
-    messages: Dict[str, str] = {}
+    messages: List[Message] = []

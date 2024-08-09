@@ -23,8 +23,10 @@ class PluginReview(BaseModel):
 class ExternalIntegration(BaseModel):
     triggers_on: str
     webhook_url: str
-    setup_completed_url: Optional[str]
+    setup_completed_url: Optional[str] = None
     setup_instructions_file_path: str
+    # TODO: refactor to be read from backend, so frontend doesn't do extra request (cache)
+    # setup_instructions_markdown: str = ''
 
 
 class Plugin(BaseModel):
@@ -32,14 +34,14 @@ class Plugin(BaseModel):
     name: str
     author: str
     description: str
-    image: str
+    image: str  # TODO: return image_url: str with the whole repo + path
     capabilities: Set[str]
-    memory_prompt: Optional[str]
-    chat_prompt: Optional[str]
-    external_integration: Optional[ExternalIntegration]
+    memory_prompt: Optional[str] = None
+    chat_prompt: Optional[str] = None
+    external_integration: Optional[ExternalIntegration] = None
     reviews: List[PluginReview] = []
-    user_review: Optional[PluginReview]
-    rating_avg: Optional[float]
+    user_review: Optional[PluginReview] = None
+    rating_avg: Optional[float] = 0
     rating_count: int = 0
     enabled: bool = False
     deleted: bool = False
@@ -61,6 +63,9 @@ class Plugin(BaseModel):
 
     def triggers_on_memory_creation(self) -> bool:
         return self.works_externally() and self.external_integration.triggers_on == 'memory_creation'
+
+    def triggers_realtime(self) -> bool:
+        return self.works_externally() and self.external_integration.triggers_on == 'transcript_processed'
 
     def get_image_url(self) -> str:
         return f'https://raw.githubusercontent.com/BasedHardware/Friend/main{self.image}'
